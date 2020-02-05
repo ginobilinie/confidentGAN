@@ -3,11 +3,14 @@ import numpy as np
 import cv2
 import torch
 from torch.utils.data import DataLoader as TorchDataLoader
-from data import PredictFlow, test_one_img, colorize, test_batch_img
 
 
 EPSILON = 1e-7
 
+def test_one_img(net,img):
+    mask = net.foward(img)[0]
+    mask = mask.squeeze().cpu().data.numpy()
+    return mask
 
 def compute_iou(net, data_loader, num_classes, img_size, batch_size, pb, epoch):
     net.eval()

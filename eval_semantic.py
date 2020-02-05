@@ -65,7 +65,7 @@ ohem_criterion = ProbOhemCrossEntropy2d(ignore_label=255, thresh=0.7,
 
 BatchNorm2d = nn.BatchNorm2d
 
-model = FPNet(17, is_training=False,
+model = FPNet(config.num_classes, is_training=False,
               criterion=criterion,
               ohem_criterion=ohem_criterion,
               dice_criterion=None,
@@ -78,8 +78,20 @@ print('test iou')
 
 model_path = ''
 
-model.load_state_dict(torch.load(model_path))
+# correctly saved model without DataParallel or DDP
+checkpoint = torch.load(model_path)
+state_dict = checkpoint['state_dict']
+
+# if it is stored without calling xx.module.state_dict, then we have to do the following stuff
+from collections import OrderedDict
+new_state_dict = OrderedDict()
+for k,v in state_dict.items():
+    name = k[7:] # remove module
+    new_state_dict[name] = v
+model.load_state_dict(new_state_dict)
+# model.load_state_dict(state_dict)
 model.eval()
+model = model.cuda()
 
 mean_iou = compute_iou(model.net, val_loader, config.num_workers, 1024, BATCH_SIZE, pb, 20)
 print(mean_iou)
