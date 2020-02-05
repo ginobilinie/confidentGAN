@@ -12,10 +12,11 @@ def test_one_img(net,img):
     mask = mask.squeeze().cpu().data.numpy()
     return mask
 
-def compute_iou(net, data_loader, num_classes, img_size, batch_size, pb, epoch):
+def compute_iou(net, data_loader, num_classes, img_size, batch_size,  epoch):
     net.eval()
     data_loader_iter = iter(data_loader)
-    pb.reset(len(data_loader_iter))
+    #pb.reset(len(data_loader_iter))
+    print(len(data_loader_iter))
     intersections, unions = [], []
     for index, (img, label_mask) in enumerate(data_loader_iter):
 
@@ -43,7 +44,8 @@ def compute_iou(net, data_loader, num_classes, img_size, batch_size, pb, epoch):
 
         intersections.append(intersections_per_image)
         unions.append(unions_per_image)
-        pb.show(0, 0, index, "iou: {:.4f}".format(np.mean(ious_per_image)))
+        #pb.show(0, 0, index, "iou: {:.4f}".format(np.mean(ious_per_image)))
+        print( index, "iou: {:.4f}".format(np.mean(ious_per_image)))
 
     intersections_by_class = np.sum(intersections, axis=0)
     unions_by_class = np.sum(unions, axis=0)
@@ -51,5 +53,5 @@ def compute_iou(net, data_loader, num_classes, img_size, batch_size, pb, epoch):
 
     mean_iou = np.mean(ious_by_class)
     msg = "epoch {} iou:{} mean_iou:{:.3f}".format(epoch, ious_by_class, mean_iou)
-    pb.summary(msg)
+    print(msg)
     return mean_iou

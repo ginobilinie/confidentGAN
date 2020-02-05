@@ -4,19 +4,19 @@ import numpy as np
 
 import torch
 import torch.utils.data
-from network import FPNet
-from data_loaders import LaneDataSet
-from loss import bce_loss, ProbOhemCrossEntropy2d
-from dice import DiceLoss
+from generator import NestedUNet 
+from dataloader import MyDataSet
+from losses import Dice_loss, ProbOhemCrossEntropy2d
+#from dice import DiceLoss
 from config import config
-import tools
+#import tools
 
-pb = tools.pb
+#pb = tools.pb
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from eval import compute_iou
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '2'
+os.environ['CUDA_VISIBLE_DEVICES'] = '3'
 os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
 
 seed = 304
@@ -52,7 +52,7 @@ def load_model(model, model_file, is_restore=False):
 
 BATCH_SIZE = 1
 
-val_dataset = LaneDataSet(config.eval_source)
+val_dataset = MyDataSet(config.eval_source)
 val_loader = DataLoader(val_dataset, batch_size=config.batch_size, shuffle=True, num_workers=config.num_workers)
 
 base_lr = 3e-2
@@ -65,18 +65,17 @@ ohem_criterion = ProbOhemCrossEntropy2d(ignore_label=255, thresh=0.7,
 
 BatchNorm2d = nn.BatchNorm2d
 
-model = FPNet(config.num_classes, is_training=False,
-              criterion=criterion,
-              ohem_criterion=ohem_criterion,
+model = NestedUNet(config.num_classes, is_training=False,
+              criterion=ohem_criterion,
               dice_criterion=None,
-              pretrained_model=None,
               norm_layer=BatchNorm2d)
 
 print(model)
 
 print('test iou')
 
-model_path = ''
+epoch=299
+model_path = os.path.join(config.snapshot_dir,'modelG_Epoch%d.pth'%epoch)
 
 # correctly saved model without DataParallel or DDP
 checkpoint = torch.load(model_path)
@@ -93,7 +92,7 @@ model.load_state_dict(new_state_dict)
 model.eval()
 model = model.cuda()
 
-mean_iou = compute_iou(model.net, val_loader, config.num_workers, 1024, BATCH_SIZE, pb, 20)
+mean_iou = compute_iou(model, val_loader, config.num_workers, 1024, BATCH_SIZE,  epoch)
 print(mean_iou)
 print('end')
 
