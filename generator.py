@@ -166,3 +166,145 @@ class NestedUNet(nn.Module):
 
         output = self.heads[-1](x0_4)
         return F.softmax(output, dim=1)
+
+
+
+class NestedUNet(nn.Module):
+    def __init__(self, out_planes, criterion, dice_criterion=None, is_training=True, norm_layer=nn.BatchNorm2d, gamma=None):
+        super(NestedUNet, self).__init__()
+
+        # self.args = args
+        self.is_training = is_training
+        self.gamma = gamma # for adversarial learning to adjust the conf map
+        self.layer0 = ConvBnRelu(3, 64, ksize=7, stride=2, pad=3, has_bn=True, has_relu=True, has_bias=False, norm_layer=norm_layer)
+        self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+        self.criterion = criterion
+        self.dice_criterion = dice_criterion
+        nb_filter = [64, 128, 256, 512, 1024]
+
+        self.pool = nn.MaxPool2d(2, 2)
+        self.up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
+
+        self.conv0_0 = VGGBlock(nb_filter[0], nb_filter[0], nb_filter[0])
+        self.conv1_0 = VGGBlock(nb_filter[0], nb_filter[1], nb_filter[1])
+        self.conv2_0 = VGGBlock(nb_filter[1], nb_filter[2], nb_filter[2])
+        self.conv3_0 = VGGBlock(nb_filter[2], nb_filter[3], nb_filter[3])
+        self.conv4_0 = VGGBlock(nb_filter[3], nb_filter[4], nb_filter[4])
+
+        self.conv0_1 = VGGBlock(nb_filter[0]+nb_filter[1], nb_filter[0], nb_filter[0])
+        self.conv1_1 = VGGBlock(nb_filter[1]+nb_filter[2], nb_filter[1], nb_filter[1])
+        self.conv2_1 = VGGBlock(nb_filter[2]+nb_filter[3], nb_filter[2], nb_filter[2])
+        self.conv3_1 = VGGBlock(nb_filter[3]+nb_filter[4], nb_filter[3], nb_filter[3])
+
+        self.conv0_2 = VGGBlock(nb_filter[0]*2+nb_filter[1], nb_filter[0], nb_filter[0])
+        self.conv1_2 = VGGBlock(nb_filter[1]*2+nb_filter[2], nb_filter[1], nb_filter[1])
+        self.conv2_2 = VGGBlock(nb_filter[2]*2+nb_filter[3], nb_filter[2], nb_filter[2])
+
+        self.conv0_3 = VGGBlock(nb_filter[0]*3+nb_filter[1], nb_filter[0], nb_filter[0])
+        self.conv1_3 = VGGBlock(nb_filter[1]*3+nb_filter[2], nb_filter[1], nb_filter[1])
+
+        self.conv0_4 = VGGBlock(nb_filter[0]*4+nb_filter[1], nb_filter[0], nb_filter[0])
+
+
+        if self.gamma is not None:
+            self.heads = [
+                    UNetHead(64, out_planes, 4,  norm_layer=norm_layer),
+            ]
+        else:
+            self.heads = [UNetHead(64, out_planes, 4, norm_layer=norm_layer),
+                    UNetHead(64, out_planes, 4,  norm_layer=norm_layer),
+                    UNetHead(64, out_planes, 4,  norm_layer=norm_layer),
+                    UNetHead(64, out_planes, 4,  norm_layer=norm_layer),
+            ]
+        self.heads = nn.ModuleList(self.heads)
+        self.business_layer = []
+        self.business_layer.append(self.layer0)
+        self.business_layer.append(self.conv0_0)
+        self.business_layer.append(self.conv1_0)
+        self.business_layer.append(self.conv2_0)
+        self.business_layer.append(self.conv3_0)
+        self.business_layer.append(self.conv4_0)
+
+        self.business_layer.append(self.conv0_1)
+        self.business_layer.append(self.conv1_1)
+        self.business_layer.append(self.conv2_1)
+        self.business_layer.append(self.conv3_1)
+
+        self.business_layer.append(self.conv0_2)
+        self.business_layer.append(self.conv1_2)
+        self.business_layer.append(self.conv2_2)
+
+        self.business_layer.append(self.conv0_3)
+        self.business_layer.append(self.conv0_4)
+
+        self.business_layer.append(self.heads)
+
+
+        # if self.args.deepsupervision:
+        #     self.final1 = nn.Conv2d(nb_filter[0], 1, kernel_size=1)
+        #     self.final2 = nn.Conv2d(nb_filter[0], 1, kernel_size=1)
+        #     self.final3 = nn.Conv2d(nb_filter[0], 1, kernel_size=1)
+        #     self.final4 = nn.Conv2d(nb_filter[0], 1, kernel_size=1)
+        # else:
+        #     self.final = nn.Conv2d(nb_filter[0], 1, kernel_size=1)
+
+
+    def forward(self, input, label=None, confMap=None):
+        '''
+
+        Args:
+            input: NxCxHxW
+            label: NxHxW
+            confMap: NxHxW
+
+        Returns:losses or sofmatx(output)
+
+        '''
+        x = self.layer0(input)
+        x = self.maxpool(x)
+        x0_0 = self.conv0_0(x)
+        x1_0 = self.conv1_0(self.pool(x0_0))
+        x0_1 = self.conv0_1(torch.cat([x0_0, self.up(x1_0)], 1))
+
+        x2_0 = self.conv2_0(self.pool(x1_0))
+        x1_1 = self.conv1_1(torch.cat([x1_0, self.up(x2_0)], 1))
+        x0_2 = self.conv0_2(torch.cat([x0_0, x0_1, self.up(x1_1)], 1))
+
+        x3_0 = self.conv3_0(self.pool(x2_0))
+        x2_1 = self.conv2_1(torch.cat([x2_0, self.up(x3_0)], 1))
+        x1_2 = self.conv1_2(torch.cat([x1_0, x1_1, self.up(x2_1)], 1))
+        x0_3 = self.conv0_3(torch.cat([x0_0, x0_1, x0_2, self.up(x1_2)], 1))
+
+        x4_0 = self.conv4_0(self.pool(x3_0))
+        x3_1 = self.conv3_1(torch.cat([x3_0, self.up(x4_0)], 1))
+        x2_2 = self.conv2_2(torch.cat([x2_0, x2_1, self.up(x3_1)], 1))
+        x1_3 = self.conv1_3(torch.cat([x1_0, x1_1, x1_2, self.up(x2_2)], 1))
+        x0_4 = self.conv0_4(torch.cat([x0_0, x0_1, x0_2, x0_3, self.up(x1_3)], 1))
+
+        if confMap is None:
+            if self.is_training and label is not None:
+                loss0 = self.criterion(self.heads[0](x0_1), label)
+                loss1 = self.criterion(self.heads[1](x0_2), label)
+                loss2 = self.criterion(self.heads[2](x0_3), label)
+                loss3 = self.criterion(self.heads[3](x0_4), label)
+
+                dice_loss0 = self.dice_criterion(self.heads[0](x0_1), label)
+                dice_loss1 = self.dice_criterion(self.heads[1](x0_2), label)
+                dice_loss2 = self.dice_criterion(self.heads[2](x0_3), label)
+                dice_loss3 = self.dice_criterion(self.heads[3](x0_4), label)
+
+                loss = loss0 + loss1 + loss2 + loss3
+                dice_loss = dice_loss0 + dice_loss1 + dice_loss2 + dice_loss3
+
+                return self.heads[-1](x0_4), loss+dice_loss, loss, dice_loss
+        else:
+            if self.is_training and label is not None:
+                loss_seg = self.criterion(self.heads[-1](x0_4), label)*self.adjust(confMap)
+                return loss_seg
+
+        output = self.heads[-1](x0_4)
+        return F.softmax(output, dim=1)
+
+
+    def adjust(self, confMap=None):
+        return (1 - confMap) ** self.gamma
