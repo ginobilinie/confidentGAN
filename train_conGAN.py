@@ -88,7 +88,8 @@ def main():
     model = NestedUNet(config.num_classes, criterion=criterion,
                 dice_criterion=dice_criterion, 
                 is_training=True,
-                norm_layer=BatchNorm2d)
+                norm_layer=BatchNorm2d,
+                gamma=2) #Note gamma is the hyper-parameter for adversarial confidence learning
     init_weight(model.business_layer, nn.init.kaiming_normal_,
                 BatchNorm2d, config.bn_eps, config.bn_momentum,
                 mode='fan_in', nonlinearity='relu')
@@ -171,11 +172,11 @@ def main():
             # then train G
             optimizer.zero_grad()
             lr = adjust_learning_rate(optimizer, current_idx)
-            G_result, loss_seg, loss_ce, loss_dice = model(x_,y_)
             D_result = model_D(x_, G_result)
             D_result = F.interpolate(D_result, size=(x_.shape[-1], x_.shape[-2]), mode='bilinear', align_corners=True).squeeze()
             D_result = F.sigmoid(D_result)
             G_adv_loss = bce_criterion(D_result, Variable(torch.ones(D_result.size()).cuda()))
+            G_result, loss_seg, loss_ce, loss_dice = model(x_,y_, D_result)
             loss_seg = loss_seg.mean()
             G_adv_loss = G_adv_loss.mean()
             G_train_loss = config.lambda_adv*G_adv_loss + loss_seg
